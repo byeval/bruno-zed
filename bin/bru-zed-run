@@ -14,21 +14,28 @@ case "$target" in
   *) target_abs="$(pwd)/$target" ;;
 esac
 
-if [ -d "$target_abs" ]; then
-  search_dir="$target_abs"
+if [ -n "${BRUNO_COLLECTION_ROOT:-}" ]; then
+  case "$BRUNO_COLLECTION_ROOT" in
+    /*) collection_root="$BRUNO_COLLECTION_ROOT" ;;
+    *) collection_root="$(pwd)/$BRUNO_COLLECTION_ROOT" ;;
+  esac
 else
-  search_dir="$(dirname "$target_abs")"
+  if [ -d "$target_abs" ]; then
+    search_dir="$target_abs"
+  else
+    search_dir="$(dirname "$target_abs")"
+  fi
+
+  collection_root="$search_dir"
+  while [ "$collection_root" != "/" ] &&
+    [ ! -f "$collection_root/bruno.json" ] &&
+    [ ! -f "$collection_root/opencollection.yml" ]; do
+    collection_root="$(dirname "$collection_root")"
+  done
 fi
 
-collection_root="$search_dir"
-while [ "$collection_root" != "/" ] &&
-  [ ! -f "$collection_root/bruno.json" ] &&
-  [ ! -f "$collection_root/opencollection.yml" ]; do
-  collection_root="$(dirname "$collection_root")"
-done
-
 if [ ! -f "$collection_root/bruno.json" ] && [ ! -f "$collection_root/opencollection.yml" ]; then
-  echo "No Bruno collection root found for $target_abs" >&2
+  echo "No Bruno collection root found at $collection_root for $target_abs" >&2
   exit 4
 fi
 
