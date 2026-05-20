@@ -2,6 +2,7 @@
 node_modules/
 *.log
 grammars/
+tree-sitter-bru/
 tree-sitter-bru/build/
 tree-sitter-bru/bindings/
 tree-sitter-bru/target/

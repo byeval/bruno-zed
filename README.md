@@ -50,11 +50,12 @@ The grammar is currently referenced through:
 
 ```toml
 [grammars.bru]
-repository = "file:///Volumes/iDev/workspace/side/bruno-zed/tree-sitter-bru"
-rev = "137db712233002b800c19401a71474df47a05d86"
+repository = "https://github.com/byeval/tree-sitter-bru"
+rev = "5ed48a02b69dd4021742a7982c2606e638852317"
 ```
 
-If this directory moves, update that path in `extension.toml`.
+For local grammar development, clone `https://github.com/byeval/tree-sitter-bru`
+into this repository as `tree-sitter-bru` or update `extension.toml` temporarily.
 
 ## CLI Task
 
@@ -114,4 +115,3 @@ npm run parse -- ../examples/kitchen-sink.bru
 
 - This is not a full Bruno GUI inside Zed. Zed currently lacks a VS Code-style WebView/custom activity panel API for recreating Bruno's full request editor.
 - The parser is editor-oriented, not a replacement for Bruno's official Ohm parser.
-- `tree-sitter-bru` is local for now. Before marketplace submission, split it into its own public repository and pin `extension.toml` to a real commit hash.
