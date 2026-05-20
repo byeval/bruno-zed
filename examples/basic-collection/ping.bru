@@ -2,19 +2,10 @@ meta {
   name: Ping
   type: http
   seq: 1
-  tags: [
-    smoke
-  ]
 }
 
 get {
-  url: https://postman-echo.com/get?hello=world
-  body: none
-  auth: none
-}
-
-headers {
-  accept: application/json
+  url: http://httpbin.org/get?hello=world
 }
 
 docs {
