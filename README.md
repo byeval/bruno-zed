@@ -7,6 +7,7 @@ First-stage Bruno support for Zed:
 - Syntax highlighting for blocks, pairs, disabled entries, variables, files, booleans, numbers, strings, and comments
 - Language injections for JSON, GraphQL, XML, JavaScript, and Markdown raw blocks
 - Runnable markers on HTTP request blocks
+- Bruno YAML runnable markers for `.yml` / `.yaml` request files that use Bruno's `http:` request shape
 - Zed task templates that call `bru run`
 - Redaction rules for likely secrets
 - POSIX helper script for resolving a request file to its Bruno collection root
@@ -22,6 +23,11 @@ First-stage Bruno support for Zed:
 │   ├── injections.scm
 │   ├── runnables.scm
 │   ├── redactions.scm
+│   └── tasks.json
+├── languages/yaml
+│   ├── config.toml
+│   ├── highlights.scm
+│   ├── runnables.scm
 │   └── tasks.json
 ├── tree-sitter-bru
 │   ├── grammar.js
@@ -55,7 +61,7 @@ Install Bruno CLI if you want runnable tasks to execute real requests:
 npm install -g @usebruno/cli
 ```
 
-With a `.bru` file open, Zed should show a runnable on the request method block, such as `get`, `post`, or `http`. The default task searches upward from the current file until it finds `bruno.json` or `opencollection.yml`, then runs:
+With a `.bru` file open, Zed should show a runnable on the request method block, such as `get`, `post`, or `http`. With a Bruno YAML request open, Zed should show the runnable on the `http:` block when it contains a method and URL. The default task searches upward from the current file until it finds `bruno.json` or `opencollection.yml`, then runs:
 
 ```sh
 bru run <relative-request-path>
