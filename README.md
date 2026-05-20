@@ -11,6 +11,7 @@ First-stage Bruno support for Zed:
 - Zed task templates that call `bru run`
 - Redaction rules for likely secrets
 - POSIX helper script for resolving a request file to its Bruno collection root
+- Built-in Bruno YAML runner for OpenCollection requests, with no PyYAML dependency
 
 ## Layout
 
@@ -73,7 +74,9 @@ The default task searches upward from the current file until it finds `bruno.jso
 bru run <relative-request-path>
 ```
 
-For `opencollection.yml` YAML collections, Bruno CLI 1.16.0 does not currently recognize the root or run `.yml` requests, so the extension uses `bin/bru-zed-yaml-run` as a first-stage HTTP runner. It supports the common HTTP request fields, including method, URL, headers, query params, and `form-urlencoded`, `json`, `text`, `xml`, `html`, or simple multipart bodies.
+For `opencollection.yml` YAML collections, Bruno CLI 1.16.0 does not currently recognize the root or run `.yml` requests, so the extension uses `bin/bru-zed-yaml-run` as a first-stage HTTP runner. It has a built-in YAML subset parser, so users do not need to install PyYAML. It supports the common HTTP request fields, including method, URL, headers, query params, and `form-urlencoded`, `json`, `text`, `xml`, `html`, or simple multipart bodies.
+
+YAML request output includes the request line, request body size, HTTP status, elapsed time, response headers, and a decoded response body. JSON responses are pretty-printed.
 
 The helper script can be tested outside Zed:
 
@@ -115,3 +118,4 @@ npm run parse -- ../examples/kitchen-sink.bru
 
 - This is not a full Bruno GUI inside Zed. Zed currently lacks a VS Code-style WebView/custom activity panel API for recreating Bruno's full request editor.
 - The parser is editor-oriented, not a replacement for Bruno's official Ohm parser.
+- The YAML runner intentionally parses a Bruno/OpenCollection-oriented YAML subset rather than implementing the entire YAML spec.

@@ -7,6 +7,7 @@
     "generate": "npm --prefix tree-sitter-bru run generate",
     "parse": "npm --prefix tree-sitter-bru run parse --",
     "test": "npm --prefix tree-sitter-bru test",
-    "check": "npm run generate && npm test"
+    "test:runner": "python3 -m unittest discover -s tests",
+    "check": "npm run generate && npm test && npm run test:runner"
   }
 }
