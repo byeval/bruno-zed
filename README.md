@@ -12,6 +12,7 @@ First-stage Bruno support for Zed:
 - Redaction rules for likely secrets
 - POSIX helper script for resolving a request file to its Bruno collection root
 - Built-in Bruno YAML runner for OpenCollection requests, with no PyYAML dependency
+- YAML runner support for `{{variable}}`, `{{process.env.NAME}}`, collection variables, folder variables, request variables, `.env`, `--env`, `--env-file`, and `--env-var`
 
 ## Layout
 
@@ -78,11 +79,22 @@ For `opencollection.yml` YAML collections, Bruno CLI 1.16.0 does not currently r
 
 YAML request output includes the request line, request body size, HTTP status, elapsed time, response headers, and a decoded response body. JSON responses are pretty-printed.
 
+YAML variables are resolved in this order:
+
+```text
+opencollection.yml < --env / --env-file < folder.yml < request.yml < --env-var
+```
+
+The YAML runner also loads `.env` from the collection root for `{{process.env.NAME}}` and `{{process.env['name.with.dots']}}` references. You can choose an environment with either CLI flags or environment variables:
+
 The helper script can be tested outside Zed:
 
 ```sh
 BRU=echo ./bin/bru-zed-run examples/basic-collection/ping.bru --env Local
 ./bin/bru-zed-run /path/to/collection/request.yml --dry-run
+./bin/bru-zed-run /path/to/collection/request.yml --env Local --env-var token=abc123
+BRUNO_ENV=Local ./bin/bru-zed-run /path/to/collection/request.yml
+BRUNO_ENV_FILE=environments/local.yml ./bin/bru-zed-run /path/to/collection/request.yml
 ```
 
 Expected output:

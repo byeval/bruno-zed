@@ -12,6 +12,9 @@ import urllib.request
 
 
 REQUEST_EXTENSIONS = (".yml", ".yaml")
+ENVIRONMENT_EXTENSIONS = (".yml", ".yaml", ".bru", ".json")
+VARIABLE_PATTERN = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
+PROCESS_ENV_BRACKET_PATTERN = re.compile(r"""^process\.env\[['"](.+?)['"]\]$""")
 TEXT_CONTENT_TYPES = (
     "application/json",
     "application/problem+json",
@@ -286,7 +289,9 @@ class SimpleYamlParser:
 
 
 def is_enabled(item):
-    return not isinstance(item, dict) or item.get("enabled", True) is not False
+    return not isinstance(item, dict) or (
+        item.get("enabled", True) is not False and item.get("disabled", False) is not True
+    )
 
 
 def as_text(value):
@@ -309,6 +314,11 @@ def load_yaml(path):
     return data
 
 
+def load_json(path):
+    with open(path, "r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
 def find_collection_root(target):
     target = os.path.abspath(target)
     search_dir = target if os.path.isdir(target) else os.path.dirname(target)
@@ -322,6 +332,274 @@ def find_collection_root(target):
         current = os.path.dirname(current)
 
     raise BrunoYamlError(f"No Bruno collection root found for {target}")
+
+
+def parse_dotenv(path):
+    values = {}
+    if not os.path.exists(path):
+        return values
+
+    with open(path, "r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export ") :].strip()
+            if "=" not in line:
+                continue
+            name, value = line.split("=", 1)
+            name = name.strip()
+            value = value.strip()
+            if not name:
+                continue
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+            values[name] = value
+    return values
+
+
+def load_bru_vars(path):
+    with open(path, "r", encoding="utf-8") as handle:
+        text = handle.read()
+
+    match = re.search(r"(^|\n)\s*vars(?::[A-Za-z_-]+)?\s*\{\s*(.*?)\n\s*\}", text, flags=re.DOTALL)
+    if not match:
+        return {}
+
+    values = {}
+    for raw_line in match.group(2).splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or line.startswith("//"):
+            continue
+        disabled = line.startswith("~")
+        if disabled:
+            line = line[1:].strip()
+        if ":" not in line:
+            continue
+        name, value = line.split(":", 1)
+        name = name.strip()
+        value = value.strip()
+        if name and not disabled:
+            values[name] = value
+    return values
+
+
+def variable_to_text(value):
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return as_text(value)
+
+
+def variable_items(value):
+    if not value:
+        return []
+    if isinstance(value, dict):
+        return [(as_text(name), variable_to_text(variable)) for name, variable in value.items()]
+    if isinstance(value, list):
+        items = []
+        for item in value:
+            if not is_enabled(item):
+                continue
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name") or item.get("key")
+            if not name:
+                continue
+            value = item.get("value")
+            if isinstance(value, dict) and "data" in value:
+                value = value.get("data")
+            items.append((as_text(name), variable_to_text(value)))
+        return items
+    return []
+
+
+def extract_variables(data):
+    if not isinstance(data, dict):
+        return {}
+
+    values = {}
+    for key in ("vars", "variables"):
+        for name, value in variable_items(data.get(key)):
+            values[name] = value
+
+    runtime = data.get("runtime")
+    if isinstance(runtime, dict):
+        for name, value in variable_items(runtime.get("variables")):
+            values[name] = value
+
+    request = data.get("request")
+    if isinstance(request, dict):
+        for name, value in variable_items(request.get("variables")):
+            values[name] = value
+
+    return values
+
+
+def load_variables_file(path):
+    extension = os.path.splitext(path)[1].lower()
+    if extension in (".yml", ".yaml"):
+        return extract_variables(load_yaml(path))
+    if extension == ".json":
+        return extract_variables(load_json(path))
+    if extension == ".bru":
+        return load_bru_vars(path)
+    return {}
+
+
+def environment_file_for_name(root, env_name):
+    if not env_name:
+        return None
+
+    env_dir = os.path.join(root, "environments")
+    if not os.path.isdir(env_dir):
+        return None
+
+    normalized = env_name.lower()
+    candidates = []
+    for extension in ENVIRONMENT_EXTENSIONS:
+        candidates.append(os.path.join(env_dir, f"{env_name}{extension}"))
+        candidates.append(os.path.join(env_dir, f"{normalized}{extension}"))
+
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+
+    for name in sorted(os.listdir(env_dir)):
+        path = os.path.join(env_dir, name)
+        if not os.path.isfile(path) or os.path.splitext(path)[1].lower() not in ENVIRONMENT_EXTENSIONS:
+            continue
+        if os.path.splitext(name)[0].lower() == normalized:
+            return path
+        try:
+            extension = os.path.splitext(path)[1].lower()
+            if extension in (".yml", ".yaml", ".json"):
+                data = load_yaml(path) if extension in (".yml", ".yaml") else load_json(path)
+                if as_text(data.get("name")).lower() == normalized:
+                    return path
+        except Exception:
+            continue
+    return None
+
+
+def parse_env_var_overrides(values):
+    result = {}
+    for value in values or []:
+        if "=" not in value:
+            raise BrunoYamlError(f"--env-var expects KEY=VALUE, got {value}")
+        name, override = value.split("=", 1)
+        name = name.strip()
+        if not name:
+            raise BrunoYamlError("--env-var expects a non-empty variable name")
+        result[name] = override
+    return result
+
+
+def load_variable_context(root, request, request_path, env_name=None, env_files=None, env_vars=None):
+    variables = {}
+
+    collection_path = os.path.join(root, "opencollection.yml")
+    if os.path.exists(collection_path):
+        variables.update(extract_variables(load_yaml(collection_path)))
+
+    environment_path = environment_file_for_name(root, env_name)
+    if env_name and not environment_path:
+        raise BrunoYamlError(f"No Bruno environment named {env_name} found in {os.path.join(root, 'environments')}")
+    if environment_path:
+        variables.update(load_variables_file(environment_path))
+
+    for env_file in env_files or []:
+        path = env_file if os.path.isabs(env_file) else os.path.join(root, env_file)
+        if not os.path.exists(path):
+            raise BrunoYamlError(f"No Bruno environment file found at {path}")
+        variables.update(load_variables_file(path))
+
+    for folder_file in folder_variable_files(root, request_path):
+        variables.update(load_variables_file(folder_file))
+
+    variables.update(extract_variables(request))
+    variables.update(parse_env_var_overrides(env_vars))
+
+    process_env = dict(os.environ)
+    process_env.update(parse_dotenv(os.path.join(root, ".env")))
+    variables = resolve_variable_values(variables, process_env)
+    return variables, process_env
+
+
+def folder_variable_files(root, request_path):
+    files = []
+    current = os.path.dirname(os.path.abspath(request_path))
+    root = os.path.abspath(root)
+    while current == root or current.startswith(root + os.sep):
+        for name in ("folder.yml", "folder.yaml", "folder.bru"):
+            path = os.path.join(current, name)
+            if os.path.exists(path):
+                files.append(path)
+        if current == root:
+            break
+        current = os.path.dirname(current)
+    return list(reversed(files))
+
+
+def resolve_variable_values(variables, process_env):
+    resolved = dict(variables)
+    for _ in range(8):
+        changed = False
+        for name, value in list(resolved.items()):
+            next_value = interpolate_string(value, resolved, process_env, set())
+            if next_value != value:
+                resolved[name] = next_value
+                changed = True
+        if not changed:
+            break
+    return resolved
+
+
+def interpolate(value, variables, process_env, unresolved):
+    if isinstance(value, str):
+        return interpolate_string(value, variables, process_env, unresolved)
+    if isinstance(value, list):
+        return [interpolate(item, variables, process_env, unresolved) for item in value]
+    if isinstance(value, dict):
+        return {
+            interpolate(key, variables, process_env, unresolved): interpolate(item, variables, process_env, unresolved)
+            for key, item in value.items()
+        }
+    return value
+
+
+def interpolate_string(value, variables, process_env, unresolved):
+    result = value
+    for _ in range(8):
+        def replacement(match):
+            name = match.group(1).strip()
+            if name.startswith("?"):
+                return match.group(0)
+            process_name = process_env_name(name)
+            if process_name is not None:
+                if process_name in process_env:
+                    return process_env[process_name]
+                unresolved.add(name)
+                return match.group(0)
+            if name in variables:
+                return as_text(variables[name])
+            unresolved.add(name)
+            return match.group(0)
+
+        next_result = VARIABLE_PATTERN.sub(replacement, result)
+        if next_result == result:
+            return result
+        result = next_result
+    return result
+
+
+def process_env_name(name):
+    if name.startswith("process.env."):
+        return name[len("process.env.") :]
+    match = PROCESS_ENV_BRACKET_PATTERN.match(name)
+    if match:
+        return match.group(1)
+    return None
 
 
 def header_items(value):
@@ -358,6 +636,19 @@ def named_values(value):
                     values.append((as_text(name), as_text(item.get("value"))))
         return values
     return []
+
+
+def query_param_values(value):
+    if isinstance(value, dict) and "data" in value:
+        return named_values(value.get("data"))
+    if isinstance(value, list):
+        values = []
+        for item in value:
+            if isinstance(item, dict) and as_text(item.get("type") or "query").lower() != "query":
+                continue
+            values.extend(named_values([item]))
+        return values
+    return named_values(value)
 
 
 def append_query(url, pairs):
@@ -416,8 +707,20 @@ def build_body(body):
     return as_text(data).encode("utf-8"), None
 
 
-def request_from_yaml(path):
+def request_from_yaml(path, root=None, env_name=None, env_files=None, env_vars=None):
+    root = root or find_collection_root(path)
     request = load_yaml(path)
+    variables, process_env = load_variable_context(
+        root,
+        request,
+        path,
+        env_name=env_name,
+        env_files=env_files,
+        env_vars=env_vars,
+    )
+    unresolved_variables = set()
+    request = interpolate(request, variables, process_env, unresolved_variables)
+
     http = request.get("http")
     if not isinstance(http, dict):
         raise BrunoYamlError(f"{path} does not contain an http request")
@@ -433,10 +736,7 @@ def request_from_yaml(path):
 
     query_pairs = []
     for candidate in (request.get("query"), http.get("query"), http.get("params")):
-        if isinstance(candidate, dict) and "data" in candidate:
-            query_pairs.extend(named_values(candidate.get("data")))
-        else:
-            query_pairs.extend(named_values(candidate))
+        query_pairs.extend(query_param_values(candidate))
     url = append_query(url, query_pairs)
 
     body_bytes, content_type = build_body(http.get("body"))
@@ -455,6 +755,7 @@ def request_from_yaml(path):
         "body": body_bytes,
         "timeout": timeout,
         "follow_redirects": follow_redirects,
+        "unresolved_variables": sorted(unresolved_variables),
     }
 
 
@@ -502,13 +803,15 @@ def print_response(status, reason, headers, body, elapsed):
         print(decoded)
 
 
-def run_request(path, dry_run=False):
-    spec = request_from_yaml(path)
+def run_request(path, root=None, env_name=None, env_files=None, env_vars=None, dry_run=False):
+    spec = request_from_yaml(path, root=root, env_name=env_name, env_files=env_files, env_vars=env_vars)
     body_len = len(spec["body"] or b"")
 
     print(f"{spec['method']} {spec['url']}")
     if body_len:
         print(f"Request body: {body_len} bytes")
+    if spec["unresolved_variables"]:
+        print(f"Unresolved variables: {', '.join(spec['unresolved_variables'])}", file=sys.stderr)
 
     if dry_run:
         return 0
@@ -565,10 +868,18 @@ def request_files(root):
     return sorted(result)
 
 
+def default_env_files():
+    value = os.environ.get("BRUNO_ENV_FILE", "")
+    return [item for item in value.split(os.pathsep) if item]
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run Bruno YAML requests from Zed")
     parser.add_argument("--collection", action="store_true", help="Run all YAML requests in the collection")
     parser.add_argument("--dry-run", action="store_true", help="Print the request without sending it")
+    parser.add_argument("--env", default=os.environ.get("BRUNO_ENV"), help="Load environments/<name>.yml, .yaml, .bru, or .json")
+    parser.add_argument("--env-file", action="append", default=default_env_files(), help="Load a Bruno environment file")
+    parser.add_argument("--env-var", action="append", default=[], help="Override a variable with KEY=VALUE")
     parser.add_argument("target", nargs="?", default=os.environ.get("ZED_FILE"))
     args, extra_args = parser.parse_known_args()
 
@@ -593,10 +904,27 @@ def main():
                 if index:
                     print()
                 print(os.path.relpath(path, root))
-                exit_code = max(exit_code, run_request(path, dry_run=args.dry_run))
+                exit_code = max(
+                    exit_code,
+                    run_request(
+                        path,
+                        root=root,
+                        env_name=args.env,
+                        env_files=args.env_file,
+                        env_vars=args.env_var,
+                        dry_run=args.dry_run,
+                    ),
+                )
             return exit_code
 
-        return run_request(target, dry_run=args.dry_run)
+        return run_request(
+            target,
+            root=root,
+            env_name=args.env,
+            env_files=args.env_file,
+            env_vars=args.env_var,
+            dry_run=args.dry_run,
+        )
     except BrunoYamlError as error:
         print(error, file=sys.stderr)
         return 65
