@@ -61,16 +61,6 @@ With a `.bru` file open, Zed should show a runnable on the request method block,
 bru run <relative-request-path>
 ```
 
-If your collection root is not an ancestor of the current file, set `BRUNO_COLLECTION_ROOT` for the task environment. The task and helper script use it before falling back to auto-discovery:
-
-```json
-{
-  "env": {
-    "BRUNO_COLLECTION_ROOT": "/absolute/path/to/collection"
-  }
-}
-```
-
 The helper script can be tested outside Zed:
 
 ```sh
