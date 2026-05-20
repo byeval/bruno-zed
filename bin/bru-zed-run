@@ -2,6 +2,13 @@
 set -eu
 
 target="${1:-${ZED_FILE:-}}"
+collection_mode=false
+
+if [ "${1:-}" = "--collection" ]; then
+  collection_mode=true
+  shift
+  target="${1:-${ZED_FILE:-}}"
+fi
 
 if [ -z "$target" ]; then
   echo "usage: bru-zed-run <request-or-folder> [bru run options...]" >&2
@@ -32,6 +39,17 @@ if [ ! -f "$collection_root/bruno.json" ] && [ ! -f "$collection_root/opencollec
   exit 4
 fi
 
+script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+
+if [ "$collection_mode" = true ]; then
+  shift || true
+  if [ -f "$collection_root/bruno.json" ]; then
+    cd "$collection_root"
+    exec "${BRU:-bru}" run "$@"
+  fi
+  exec "$script_dir/bru-zed-yaml-run" --collection "$target_abs" "$@"
+fi
+
 case "$target_abs" in
   "$collection_root"/*) rel="${target_abs#"$collection_root/"}" ;;
   "$collection_root") rel="" ;;
@@ -40,7 +58,18 @@ esac
 
 shift || true
 
+case "$target_abs" in
+  *.yml | *.yaml)
+    exec "$script_dir/bru-zed-yaml-run" "$target_abs" "$@"
+    ;;
+esac
+
 cd "$collection_root"
+
+if [ ! -f "$collection_root/bruno.json" ]; then
+  echo "Bruno CLI cannot run this collection because it has opencollection.yml but no bruno.json" >&2
+  exit 4
+fi
 
 if [ -n "$rel" ]; then
   exec "${BRU:-bru}" run "$rel" "$@"

@@ -17,6 +17,9 @@ First-stage Bruno support for Zed:
 ```text
 .
 ├── extension.toml
+├── bin
+│   ├── bru-zed-run
+│   └── bru-zed-yaml-run
 ├── languages/bru
 │   ├── config.toml
 │   ├── highlights.scm
@@ -55,22 +58,27 @@ If this directory moves, update that path in `extension.toml`.
 
 ## CLI Task
 
-Install Bruno CLI if you want runnable tasks to execute real requests:
+Install Bruno CLI if you want `.bru` runnable tasks to execute real requests:
 
 ```sh
 npm install -g @usebruno/cli
 ```
 
-With a `.bru` file open, Zed should show a runnable on the request method block, such as `get`, `post`, or `http`. With a Bruno YAML request open, Zed should show the runnable on the `http:` block when it contains a method and URL. The default task searches upward from the current file until it finds `bruno.json` or `opencollection.yml`, then runs:
+With a `.bru` file open, Zed should show a runnable on the request method block, such as `get`, `post`, or `http`. With a Bruno YAML request open, Zed should show the runnable on the `http:` block when it contains a method and URL.
+
+The default task searches upward from the current file until it finds `bruno.json` or `opencollection.yml`. For `bruno.json` collections, it delegates to Bruno CLI:
 
 ```sh
 bru run <relative-request-path>
 ```
 
+For `opencollection.yml` YAML collections, Bruno CLI 1.16.0 does not currently recognize the root or run `.yml` requests, so the extension uses `bin/bru-zed-yaml-run` as a first-stage HTTP runner. It supports the common HTTP request fields, including method, URL, headers, query params, and `form-urlencoded`, `json`, `text`, `xml`, `html`, or simple multipart bodies.
+
 The helper script can be tested outside Zed:
 
 ```sh
 BRU=echo ./bin/bru-zed-run examples/basic-collection/ping.bru --env Local
+./bin/bru-zed-run /path/to/collection/request.yml --dry-run
 ```
 
 Expected output:

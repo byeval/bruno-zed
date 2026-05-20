@@ -1,0 +1,289 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+try:
+    import yaml
+except ImportError:
+    print("PyYAML is required to run Bruno YAML requests from Zed.", file=sys.stderr)
+    print("Install it with: python3 -m pip install PyYAML", file=sys.stderr)
+    sys.exit(69)
+
+
+REQUEST_EXTENSIONS = (".yml", ".yaml")
+
+
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def is_enabled(item):
+    return not isinstance(item, dict) or item.get("enabled", True) is not False
+
+
+def as_text(value):
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def load_yaml(path):
+    with open(path, "r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} is not a Bruno YAML request")
+    return data
+
+
+def find_collection_root(target):
+    target = os.path.abspath(target)
+    search_dir = target if os.path.isdir(target) else os.path.dirname(target)
+
+    current = search_dir
+    while current != os.path.dirname(current):
+        if os.path.exists(os.path.join(current, "bruno.json")) or os.path.exists(
+            os.path.join(current, "opencollection.yml")
+        ):
+            return current
+        current = os.path.dirname(current)
+
+    raise ValueError(f"No Bruno collection root found for {target}")
+
+
+def header_items(value):
+    if not value:
+        return []
+    if isinstance(value, dict):
+        return [(as_text(k), as_text(v)) for k, v in value.items()]
+    if isinstance(value, list):
+        items = []
+        for item in value:
+            if not is_enabled(item):
+                continue
+            if isinstance(item, dict):
+                name = item.get("name") or item.get("key")
+                if name:
+                    items.append((as_text(name), as_text(item.get("value"))))
+        return items
+    return []
+
+
+def named_values(value):
+    if not value:
+        return []
+    if isinstance(value, dict):
+        return [(as_text(k), as_text(v)) for k, v in value.items()]
+    if isinstance(value, list):
+        values = []
+        for item in value:
+            if not is_enabled(item):
+                continue
+            if isinstance(item, dict):
+                name = item.get("name") or item.get("key")
+                if name:
+                    values.append((as_text(name), as_text(item.get("value"))))
+        return values
+    return []
+
+
+def append_query(url, pairs):
+    if not pairs:
+        return url
+
+    parts = urllib.parse.urlsplit(url)
+    existing = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    query = urllib.parse.urlencode(existing + pairs, doseq=True)
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+
+def build_multipart(fields):
+    boundary = "----bruno-zed-form-boundary"
+    chunks = []
+    for name, value in fields:
+        chunks.append(f"--{boundary}\r\n")
+        chunks.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n')
+        chunks.append(value)
+        chunks.append("\r\n")
+    chunks.append(f"--{boundary}--\r\n")
+    return "".join(chunks).encode("utf-8"), f"multipart/form-data; boundary={boundary}"
+
+
+def build_body(body):
+    if not isinstance(body, dict):
+        return None, None
+
+    body_type = as_text(body.get("type")).lower()
+    data = body.get("data")
+
+    if body_type in ("", "none", "no-body"):
+        return None, None
+
+    if body_type in ("form-urlencoded", "x-www-form-urlencoded"):
+        return urllib.parse.urlencode(named_values(data), doseq=True).encode("utf-8"), "application/x-www-form-urlencoded"
+
+    if body_type == "multipart":
+        return build_multipart(named_values(data))
+
+    if body_type == "json":
+        if isinstance(data, str):
+            return data.encode("utf-8"), "application/json"
+        return json.dumps(data if data is not None else {}, ensure_ascii=False).encode("utf-8"), "application/json"
+
+    if body_type in ("text", "xml", "html"):
+        content_type = "text/plain"
+        if body_type == "xml":
+            content_type = "application/xml"
+        elif body_type == "html":
+            content_type = "text/html"
+        return as_text(data).encode("utf-8"), content_type
+
+    if data is None:
+        return None, None
+    return as_text(data).encode("utf-8"), None
+
+
+def request_from_yaml(path):
+    request = load_yaml(path)
+    http = request.get("http")
+    if not isinstance(http, dict):
+        raise ValueError(f"{path} does not contain an http request")
+
+    method = as_text(http.get("method") or "GET").upper()
+    url = as_text(http.get("url"))
+    if not url:
+        raise ValueError(f"{path} does not contain http.url")
+
+    headers = {}
+    for name, value in header_items(request.get("headers")) + header_items(http.get("headers")):
+        headers[name] = value
+
+    query_pairs = []
+    for candidate in (request.get("query"), http.get("query"), http.get("params")):
+        if isinstance(candidate, dict) and "data" in candidate:
+            query_pairs.extend(named_values(candidate.get("data")))
+        else:
+            query_pairs.extend(named_values(candidate))
+    url = append_query(url, query_pairs)
+
+    body_bytes, content_type = build_body(http.get("body"))
+    if body_bytes is not None and content_type and not any(k.lower() == "content-type" for k in headers):
+        headers["Content-Type"] = content_type
+
+    settings = request.get("settings") if isinstance(request.get("settings"), dict) else {}
+    timeout = settings.get("timeout", 0)
+    timeout = None if not timeout else float(timeout) / 1000
+    follow_redirects = settings.get("followRedirects", True) is not False
+
+    return {
+        "method": method,
+        "url": url,
+        "headers": headers,
+        "body": body_bytes,
+        "timeout": timeout,
+        "follow_redirects": follow_redirects,
+    }
+
+
+def run_request(path, dry_run=False):
+    spec = request_from_yaml(path)
+    body_len = len(spec["body"] or b"")
+
+    print(f"{spec['method']} {spec['url']}")
+    if body_len:
+        print(f"Request body: {body_len} bytes")
+
+    if dry_run:
+        return 0
+
+    req = urllib.request.Request(
+        spec["url"],
+        data=spec["body"],
+        headers=spec["headers"],
+        method=spec["method"],
+    )
+    opener = urllib.request.build_opener() if spec["follow_redirects"] else urllib.request.build_opener(NoRedirectHandler)
+
+    try:
+        response = opener.open(req, timeout=spec["timeout"])
+        status = response.status
+        reason = response.reason
+        body = response.read()
+        headers = response.headers
+    except urllib.error.HTTPError as error:
+        status = error.code
+        reason = error.reason
+        body = error.read()
+        headers = error.headers
+    except urllib.error.URLError as error:
+        print(f"Request failed: {error.reason}", file=sys.stderr)
+        return 1
+
+    print(f"{status} {reason}")
+    content_type = headers.get("content-type", "")
+    charset = "utf-8"
+    if "charset=" in content_type:
+        charset = content_type.split("charset=", 1)[1].split(";", 1)[0].strip()
+    if body:
+        print()
+        print(body.decode(charset or "utf-8", errors="replace"))
+    return 0 if status < 400 else 1
+
+
+def request_files(root):
+    result = []
+    for current, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in (".git", "node_modules")]
+        for name in files:
+            if name == "opencollection.yml":
+                continue
+            if name.endswith(REQUEST_EXTENSIONS):
+                path = os.path.join(current, name)
+                try:
+                    data = load_yaml(path)
+                except Exception:
+                    continue
+                if isinstance(data.get("http"), dict):
+                    result.append(path)
+    return sorted(result)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run Bruno YAML requests from Zed")
+    parser.add_argument("--collection", action="store_true", help="Run all YAML requests in the collection")
+    parser.add_argument("--dry-run", action="store_true", help="Print the request without sending it")
+    parser.add_argument("target", nargs="?", default=os.environ.get("ZED_FILE"))
+    args = parser.parse_args()
+
+    if not args.target:
+        print("usage: bru-zed-yaml-run <request.yml>", file=sys.stderr)
+        return 64
+
+    target = os.path.abspath(args.target)
+    root = find_collection_root(target)
+
+    if args.collection:
+        files = request_files(root)
+        if not files:
+            print(f"No Bruno YAML requests found in {root}", file=sys.stderr)
+            return 4
+        exit_code = 0
+        for index, path in enumerate(files):
+            if index:
+                print()
+            print(os.path.relpath(path, root))
+            exit_code = max(exit_code, run_request(path, dry_run=args.dry_run))
+        return exit_code
+
+    return run_request(target, dry_run=args.dry_run)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
