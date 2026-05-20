@@ -1,0 +1,12 @@
+{
+  "name": "bruno-zed",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Zed language extension for Bruno .bru files.",
+  "scripts": {
+    "generate": "npm --prefix tree-sitter-bru run generate",
+    "parse": "npm --prefix tree-sitter-bru run parse --",
+    "test": "npm --prefix tree-sitter-bru test",
+    "check": "npm run generate && npm test"
+  }
+}

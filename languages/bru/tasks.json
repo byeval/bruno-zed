@@ -1,0 +1,19 @@
+[
+  {
+    "label": "Bruno: Run current request",
+    "command": "file=\"$ZED_FILE\"; dir=\"$ZED_DIRNAME\"; while [ \"$dir\" != \"/\" ] && [ ! -f \"$dir/bruno.json\" ] && [ ! -f \"$dir/opencollection.yml\" ]; do dir=$(dirname \"$dir\"); done; if [ ! -f \"$dir/bruno.json\" ] && [ ! -f \"$dir/opencollection.yml\" ]; then echo \"No Bruno collection root found for $file\"; exit 4; fi; rel=${file#\"$dir/\"}; cd \"$dir\" && bru run \"$rel\"",
+    "tags": ["bruno-request"],
+    "reveal": "always",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "save": "current"
+  },
+  {
+    "label": "Bruno: Run current collection",
+    "command": "dir=\"$ZED_DIRNAME\"; while [ \"$dir\" != \"/\" ] && [ ! -f \"$dir/bruno.json\" ] && [ ! -f \"$dir/opencollection.yml\" ]; do dir=$(dirname \"$dir\"); done; if [ ! -f \"$dir/bruno.json\" ] && [ ! -f \"$dir/opencollection.yml\" ]; then echo \"No Bruno collection root found for $ZED_FILE\"; exit 4; fi; cd \"$dir\" && bru run",
+    "reveal": "always",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "save": "all"
+  }
+]

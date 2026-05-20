@@ -1,0 +1,49 @@
+#!/usr/bin/env sh
+set -eu
+
+target="${1:-${ZED_FILE:-}}"
+
+if [ -z "$target" ]; then
+  echo "usage: bru-zed-run <request-or-folder> [bru run options...]" >&2
+  echo "or set ZED_FILE when running from a Zed task" >&2
+  exit 64
+fi
+
+case "$target" in
+  /*) target_abs="$target" ;;
+  *) target_abs="$(pwd)/$target" ;;
+esac
+
+if [ -d "$target_abs" ]; then
+  search_dir="$target_abs"
+else
+  search_dir="$(dirname "$target_abs")"
+fi
+
+collection_root="$search_dir"
+while [ "$collection_root" != "/" ] &&
+  [ ! -f "$collection_root/bruno.json" ] &&
+  [ ! -f "$collection_root/opencollection.yml" ]; do
+  collection_root="$(dirname "$collection_root")"
+done
+
+if [ ! -f "$collection_root/bruno.json" ] && [ ! -f "$collection_root/opencollection.yml" ]; then
+  echo "No Bruno collection root found for $target_abs" >&2
+  exit 4
+fi
+
+case "$target_abs" in
+  "$collection_root"/*) rel="${target_abs#"$collection_root/"}" ;;
+  "$collection_root") rel="" ;;
+  *) rel="$target_abs" ;;
+esac
+
+shift || true
+
+cd "$collection_root"
+
+if [ -n "$rel" ]; then
+  exec "${BRU:-bru}" run "$rel" "$@"
+fi
+
+exec "${BRU:-bru}" run "$@"

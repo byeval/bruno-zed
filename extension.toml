@@ -1,0 +1,11 @@
+id = "bruno"
+name = "Bruno"
+description = "Bru language support and Bruno CLI tasks for Zed."
+version = "0.1.0"
+schema_version = 1
+authors = ["Codex <codex@example.invalid>"]
+repository = "https://github.com/usebruno/bruno"
+
+[grammars.bru]
+repository = "file:///Volumes/iDev/workspace/side/bruno-zed/tree-sitter-bru"
+rev = "137db712233002b800c19401a71474df47a05d86"

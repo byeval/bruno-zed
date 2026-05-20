@@ -1,0 +1,48 @@
+meta {
+  name: Kitchen Sink
+  type: http
+  seq: 1
+  tags: [
+    smoke
+    regression
+  ]
+}
+
+post {
+  url: https://example.com/users/{{userId}}
+  body: json
+  auth: bearer
+}
+
+params:path {
+  userId: 42
+}
+
+headers {
+  Authorization: Bearer {{token}}
+  content-type: application/json
+  ~x-disabled: true
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {
+    "name": "Bruno",
+    "active": true
+  }
+}
+
+script:pre-request {
+  bru.setVar("startedAt", Date.now());
+}
+
+tests {
+  expect(res.status).to.equal(200);
+}
+
+docs {
+  Demonstrates common Bru blocks for parser and highlighting checks.
+}

@@ -1,0 +1,6 @@
+.DS_Store
+node_modules/
+*.log
+tree-sitter-bru/build/
+tree-sitter-bru/bindings/
+tree-sitter-bru/target/
